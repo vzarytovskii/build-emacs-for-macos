@@ -388,7 +388,7 @@ class Build
         ENV['CFLAGS'] = [
           "-I#{File.join(gcc_info.root_dir, 'include')}",
           "-I#{File.join(gcc_info.libgccjit_root_dir, 'include')}",
-          '-O2',
+          '-O3',
           (options[:native_march] ? '-march=native' : nil),
           ENV.fetch('CFLAGS', nil)
         ].compact.join(' ')
@@ -1464,9 +1464,9 @@ end
 if __FILE__ == $PROGRAM_NAME
   cli_options = {
     work_dir: File.expand_path(__dir__),
-    native_full_aot: false,
+    native_full_aot: true,
     relink_eln: true,
-    native_march: false,
+    native_march: true,
     parallel: Etc.nprocessors,
     rsvg: true,
     dbus: true,
@@ -1478,7 +1478,10 @@ if __FILE__ == $PROGRAM_NAME
     self_sign: true,
     archive: true,
     archive_keep: false,
-    log_level: 'info'
+    log_level: 'info',
+    poll: true,
+    no_titlebar: false,
+    no_frame_refocus: true
   }
 
   begin
@@ -1527,13 +1530,13 @@ if __FILE__ == $PROGRAM_NAME
         opts.on(
           '--[no-]native-march',
           'Enable/disable -march=native CFLAG' \
-          '(default: disabled)'
+          '(default: enabled)'
         ) { |v| cli_options[:native_march] = v }
 
         opts.on(
           '--[no-]native-full-aot',
           'Enable/disable NATIVE_FULL_AOT / Ahead of Time compilation ' \
-          '(default: disabled)'
+          '(default: enabled)'
         ) { |v| cli_options[:native_full_aot] = v }
 
         opts.on(
@@ -1556,7 +1559,7 @@ if __FILE__ == $PROGRAM_NAME
         opts.on(
           '--no-titlebar',
           'Apply no-titlebar patch (default: disabled)'
-        ) { cli_options[:no_titlebar] = true }
+        ) { |v| cli_options[:no_titlebar] = v }
 
         opts.on('--posix-spawn', 'Apply posix-spawn patch (deprecated)') do
           warn '==> WARN: posix-spawn patch is deprecated as has no effect.'
@@ -1564,14 +1567,14 @@ if __FILE__ == $PROGRAM_NAME
 
         opts.on(
           '--no-frame-refocus',
-          'Apply no-frame-refocus patch (default: disabled)'
-        ) { cli_options[:no_frame_refocus] = true }
+          'Apply no-frame-refocus patch (default: enabled)'
+        ) { |v| cli_options[:no_frame_refocus] = v }
 
         opts.on(
           '--[no-]poll',
           'Enable/disable experimental use of poll() instead of select() ' \
           'to support > 1024 file descriptors ' \
-          '(default: disabled)'
+          '(default: enabled)'
         ) { |v| cli_options[:poll] = v }
 
         opts.on(
