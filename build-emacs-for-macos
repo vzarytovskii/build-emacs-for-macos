@@ -1481,7 +1481,7 @@ if __FILE__ == $PROGRAM_NAME
     log_level: 'info',
     poll: true,
     no_titlebar: false,
-    no_frame_refocus: true
+    no_frame_refocus: false
   }
 
   begin
@@ -1567,7 +1567,7 @@ if __FILE__ == $PROGRAM_NAME
 
         opts.on(
           '--no-frame-refocus',
-          'Apply no-frame-refocus patch (default: enabled)'
+          'Apply no-frame-refocus patch (default: disabled)'
         ) { |v| cli_options[:no_frame_refocus] = v }
 
         opts.on(
