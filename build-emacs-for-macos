@@ -451,6 +451,7 @@ class Build
       ].flatten.join(':')
 
       configure_flags = [
+        '--with-no-title-bars',
         '--with-ns',
         '--with-modules',
         "--enable-locallisppath=#{local_lisp_path}"
@@ -743,15 +744,17 @@ class Build
         'emacs-28'
       when /^emacs-29.*/
         'emacs-29'
-      else
+      when /^emacs-30.*/
         'emacs-30'
+      else
+        'emacs-31'
       end
   end
 
   def patches(opts = {})
     p = []
 
-    if %w[emacs-26 emacs-27 emacs-28 emacs-29 emacs-30].include?(
+    if %w[emacs-26 emacs-27 emacs-28 emacs-29 emacs-30 emacs-31].include?(
       effective_version
     )
       p << {
@@ -761,14 +764,14 @@ class Build
       }
     end
 
-    if %w[emacs-27 emacs-28 emacs-29 emacs-30].include?(effective_version)
+    if %w[emacs-27 emacs-28 emacs-29 emacs-30 emacs-31].include?(effective_version)
       p << {
         url:
           'https://github.com/d12frosted/homebrew-emacs-plus/raw/master/' \
           "patches/#{effective_version}/system-appearance.patch"
       }
 
-      if options[:no_titlebar]
+      if %w[emacs-27 emacs-28 emacs-29].include?(effective_version) && options[:no_titlebar]
         p << {
           url:
             'https://github.com/d12frosted/homebrew-emacs-plus/raw/master/' \
@@ -776,7 +779,7 @@ class Build
         }
       end
 
-      if options[:no_frame_refocus]
+      if %w[emacs-27 emacs-28 emacs-29].include?(effective_version) && options[:no_frame_refocus]
         p << {
           url:
             'https://github.com/d12frosted/homebrew-emacs-plus/raw/master/' \
@@ -785,7 +788,7 @@ class Build
       end
     end
 
-    if %w[emacs-29 emacs-30].include?(effective_version)
+    if %w[emacs-29 emacs-30 emacs-31].include?(effective_version)
       p << {
         url:
           'https://github.com/d12frosted/homebrew-emacs-plus/raw/master/' \
