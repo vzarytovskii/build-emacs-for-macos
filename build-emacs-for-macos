@@ -794,13 +794,6 @@ class Build
           'https://github.com/d12frosted/homebrew-emacs-plus/raw/master/' \
           "patches/#{effective_version}/round-undecorated-frame.patch"
       }
-      if options[:poll]
-        p << {
-          url:
-            'https://github.com/d12frosted/homebrew-emacs-plus/raw/master/' \
-            "patches/#{effective_version}/poll.patch"
-        }
-      end
     end
 
     if effective_version == 'emacs-28'
@@ -1487,7 +1480,6 @@ if __FILE__ == $PROGRAM_NAME
     archive: true,
     archive_keep: false,
     log_level: 'info',
-    poll: true,
     no_titlebar: false,
     no_frame_refocus: false
   }
@@ -1577,13 +1569,6 @@ if __FILE__ == $PROGRAM_NAME
           '--no-frame-refocus',
           'Apply no-frame-refocus patch (default: disabled)'
         ) { |v| cli_options[:no_frame_refocus] = v }
-
-        opts.on(
-          '--[no-]poll',
-          'Enable/disable experimental use of poll() instead of select() ' \
-          'to support > 1024 file descriptors ' \
-          '(default: enabled)'
-        ) { |v| cli_options[:poll] = v }
 
         opts.on(
           '--github-src-repo REPO',
