@@ -1296,6 +1296,7 @@ class GccLibEmbedder < AbstractEmbedder
   private
 
   NATIVE_COMP_ENV_VAR_TPL = <<~ELISP
+    ;;; -*- lexical-binding: t; -*-
     ;; Set LIBRARY_PATH to point at bundled GCC and Xcode Command Line Tools to
     ;; ensure native-comp works.
     (when (and (eq system-type 'darwin)
