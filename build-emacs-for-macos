@@ -140,7 +140,7 @@ class Build
 
   def initialize(root_dir, ref = nil, options = {})
     @root_dir = root_dir
-    @ref = ref || 'master'
+    @ref = ref || 'feature/igc'
     @options = options
     @gcc_info = GccInfo.new
   end
@@ -315,6 +315,10 @@ class Build
       !!configure_help.match(/\s+--with-tree-sitter(\s|=).+/)
   end
 
+  def supports_mps?
+    @supports_mps ||= !!configure_help.match(/\s+--with-mps\s+/)
+  end
+
   def supports_native_comp?
     @supports_native_comp ||= !native_comp_configure_flag.nil?
   end
@@ -421,6 +425,18 @@ class Build
         ].compact.join(' ')
       end
 
+      if options[:mps]
+        ENV['CFLAGS'] = [
+          '-I/opt/homebrew/opt/libmps/include',
+          ENV.fetch('CFLAGS', nil)
+        ].compact.join(' ')
+
+        ENV['LDFLAGS'] = [
+          '-L/opt/homebrew/opt/libmps/lib',
+          ENV.fetch('LDFLAGS', nil)
+        ].compact.join(' ')
+      end
+
       ENV['CC'] = 'clang'
       ENV['PKG_CONFIG_PATH'] = [
         File.join(brew_dir, 'lib/pkgconfig'),
@@ -470,6 +486,9 @@ class Build
       end
       if options[:tree_sitter] && supports_tree_sitter?
         configure_flags << '--with-tree-sitter'
+      end
+      if options[:mps] && supports_mps?
+        configure_flags << '--with-mps=yes'
       end
       configure_flags << native_comp_configure_flag if options[:native_comp]
       configure_flags << '--without-rsvg' if options[:rsvg] == false
@@ -990,6 +1009,7 @@ end
 
 class CSourcesEmbedder < AbstractEmbedder
   PATH_PATCH = <<~ELISP
+    ;;; -*- lexical-binding: t; -*-
     ;; Allow Emacs to find bundled C sources.
     (setq source-directory
       (expand-file-name ".." (file-name-directory load-file-name)))
@@ -1483,6 +1503,7 @@ if __FILE__ == $PROGRAM_NAME
     dbus: true,
     xwidgets: true,
     tree_sitter: true,
+    mps: true,
     fd_setsize: 10_000,
     github_src_repo: nil,
     github_auth: true,
@@ -1566,6 +1587,11 @@ if __FILE__ == $PROGRAM_NAME
           '--[no-]dbus',
           'Enable/disable dbus support (default: enabled)'
         ) { |v| cli_options[:dbus] = v }
+
+        opts.on(
+          '--[no-]mps',
+          'Enable/disable MPS support (default: enabled)'
+        ) { |v| cli_options[:mps] = v }
 
         opts.on(
           '--no-titlebar',
