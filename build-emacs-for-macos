@@ -140,7 +140,8 @@ class Build
 
   def initialize(root_dir, ref = nil, options = {})
     @root_dir = root_dir
-    @ref = ref || 'feature/igc'
+    #@ref = ref || 'feature/igc'
+    @ref = ref || 'master'
     @options = options
     @gcc_info = GccInfo.new
   end
@@ -774,8 +775,10 @@ class Build
         'emacs-29'
       when /^emacs-30.*/
         'emacs-30'
-      else
+      when /^emacs-31.*/
         'emacs-31'
+      else
+        'emacs-32'
       end
   end
 
@@ -1045,7 +1048,7 @@ class CSourcesEmbedder < AbstractEmbedder
 
     debug "Patching '#{relative_path(site_start_el_file)}' to allow Emacs to " \
           'find bundled C sources'
-    File.open(site_start_el_file, 'a') { |f| f.puts("\n#{PATH_PATCH}") }
+    File.open(site_start_el_file, 'a') { |f| f.puts("#{PATH_PATCH}") }
   end
 
   private
@@ -1310,7 +1313,7 @@ class GccLibEmbedder < AbstractEmbedder
     end
 
     debug 'Setting up site-start.el for self-contained native-comp Emacs.app'
-    File.open(site_start_el_file, 'a') { |f| f.puts("\n#{env_setup}") }
+    File.open(site_start_el_file, 'a') { |f| f.puts("#{env_setup}") }
   end
 
   private
