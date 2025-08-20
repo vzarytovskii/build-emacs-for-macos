@@ -477,6 +477,7 @@ class Build
       ].flatten.join(':')
 
       configure_flags = [
+        '--without-compress-install',
         '--with-no-title-bars',
         '--with-ns',
         '--with-modules',
