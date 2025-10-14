@@ -393,8 +393,14 @@ class Build
         ENV['CFLAGS'] = [
           "-I#{File.join(gcc_info.root_dir, 'include')}",
           "-I#{File.join(gcc_info.libgccjit_root_dir, 'include')}",
-          '-O3',
+          '-O4',
           (options[:native_march] ? '-march=native' : nil),
+          (options[:native_march] ? '-mtune=native' : nil),
+          '-ffast-math',
+          '-fomit-frame-pointer',
+          '-fno-finite-math-only',
+          '-pipe',
+          '-flto=full',
           ENV.fetch('CFLAGS', nil)
         ].compact.join(' ')
 
@@ -406,6 +412,8 @@ class Build
           "-I#{File.join(gcc_info.libgccjit_root_dir, 'include')}",
           # Ensure library re-linking and code signing will work after building.
           '-Wl,-headerpad_max_install_names',
+          '-Wl,-O1',
+          '-flto=full',
           ENV.fetch('LDFLAGS', nil)
         ].compact.join(' ')
 
@@ -496,6 +504,10 @@ class Build
       configure_flags << '--without-rsvg' if options[:rsvg] == false
       configure_flags << '--without-dbus' if options[:dbus] == false
 
+      if options[:native_comp]
+        configure_flags << '--with-native-compilation=aot'
+      end
+
       run_cmd './configure', *configure_flags.compact
 
       # Disable aligned_alloc on Mojave and below. See issue:
@@ -510,7 +522,7 @@ class Build
       make_flags += ['-j', options[:parallel].to_s] if options[:parallel]
 
       if options[:native_comp]
-        make_flags << "BYTE_COMPILE_EXTRA_FLAGS=--eval '(setq comp-speed 2)'"
+        make_flags << "BYTE_COMPILE_EXTRA_FLAGS=--eval '(setq comp-speed 3 native-comp-speed 3)'"
 
         if options[:native_full_aot]
           info 'Using native compile full AOT'
