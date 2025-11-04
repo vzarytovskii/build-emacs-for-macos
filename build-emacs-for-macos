@@ -393,7 +393,7 @@ class Build
         ENV['CFLAGS'] = [
           "-I#{File.join(gcc_info.root_dir, 'include')}",
           "-I#{File.join(gcc_info.libgccjit_root_dir, 'include')}",
-          '-O4',
+          '-O3',
           (options[:native_march] ? '-march=native' : nil),
           (options[:native_march] ? '-mtune=native' : nil),
           '-ffast-math',
@@ -1516,7 +1516,7 @@ if __FILE__ == $PROGRAM_NAME
     native_march: true,
     parallel: Etc.nprocessors,
     rsvg: true,
-    dbus: true,
+    dbus: false,
     xwidgets: true,
     tree_sitter: true,
     mps: true,
@@ -1525,7 +1525,7 @@ if __FILE__ == $PROGRAM_NAME
     github_auth: true,
     dist_include: ['COPYING'],
     self_sign: true,
-    archive: true,
+    archive: false,
     archive_keep: false,
     log_level: 'info',
     no_titlebar: false,
@@ -1601,7 +1601,7 @@ if __FILE__ == $PROGRAM_NAME
 
         opts.on(
           '--[no-]dbus',
-          'Enable/disable dbus support (default: enabled)'
+          'Enable/disable dbus support (default: disabled)'
         ) { |v| cli_options[:dbus] = v }
 
         opts.on(
