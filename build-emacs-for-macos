@@ -170,10 +170,9 @@ class GitHubFetcher < AbstractFetcher
   end
 
   def fetch_metadata
-    ref_sha = options[:git_sha] || ref
-    info "Fetching GitHub metadata for ref: #{ref_sha}"
-    commit_json = github_api_get("/repos/#{repo}/commits/#{ref_sha}")
-    fatal "Failed to get commit info about: #{ref_sha}" if commit_json.nil?
+    info "Fetching GitHub metadata for ref: #{ref}"
+    commit_json = github_api_get("/repos/#{repo}/commits/#{ref}")
+    fatal "Failed to get commit info about: #{ref}" if commit_json.nil?
 
     commit = JSON.parse(commit_json)
     meta = {
@@ -254,7 +253,7 @@ class GenericGitFetcher < AbstractFetcher
       repo_dir = File.join(tmpdir, 'repo')
 
       # Shallow clone the specific branch/ref
-      run_cmd('git', 'clone', '--depth', '1', '--branch', ref, git_url, repo_dir)
+      run_cmd('git', 'clone', '--depth', '1', '--revision', ref, git_url, repo_dir)
 
       Dir.chdir(repo_dir) do
         sha = `git rev-parse HEAD`.strip
@@ -287,7 +286,7 @@ class GenericGitFetcher < AbstractFetcher
          'please be patient.'
 
     # Shallow clone to the target directory
-    run_cmd('git', 'clone', '--depth', '1', '--branch', ref, git_url, target)
+    run_cmd('git', 'clone', '--depth', '1', '--revision', ref, git_url, target)
 
     # Remove .git directory to save space
     FileUtils.rm_rf(File.join(target, '.git'))
@@ -314,8 +313,7 @@ class Build
 
   def initialize(root_dir, ref = nil, options = {})
     @root_dir = root_dir
-    @ref = ref || 'feature/igc'
-    #@ref = ref || 'master'
+    @ref = ref || 'master'
     @options = options
     @gcc_info = GccInfo.new
   end
@@ -1657,7 +1655,7 @@ if __FILE__ == $PROGRAM_NAME
     tree_sitter: true,
     mps: true,
     fd_setsize: 10_000,
-    git_url: 'https://github.com/emacs-mirror/emacs',
+    git_url: 'https://https.git.savannah.gnu.org/git/emacs.git',
     github_auth: true,
     dist_include: ['COPYING'],
     self_sign: true,
@@ -1665,17 +1663,20 @@ if __FILE__ == $PROGRAM_NAME
     archive_keep: false,
     log_level: 'info',
     no_titlebar: false,
-    no_frame_refocus: false
+    no_frame_refocus: false,
+    ref: 'refs/heads/feature/igc'  # Will use 'master' as default if not specified
   }
 
   begin
     OptionParser
       .new do |opts|
         opts.banner = <<~DOC
-          Usage: ./build-emacs-for-macos [options] <branch/tag/sha>
+          Usage: ./build-emacs-for-macos [options]
 
           By default, sources are fetched from GitHub (emacs-mirror/emacs).
           Use --git-url to specify a different source repository.
+          Use --ref to specify branch, tag, or commit to build.
+
           The fetcher type is auto-detected based on the URL hostname:
             - github.com: Uses GitHub API and tarball downloads
             - Others: Uses git shallow clone
@@ -1684,17 +1685,16 @@ if __FILE__ == $PROGRAM_NAME
         DOC
 
         opts.on(
+          '--ref REF',
+          'Git ref to build: branch name, tag, or commit SHA. (default: master)'
+        ) { |v| cli_options[:ref] = v }
+
+        opts.on(
           '-j',
           '--parallel COUNT',
           'Compile using COUNT parallel processes ' \
           "(detected: #{cli_options[:parallel]})"
         ) { |v| cli_options[:parallel] = v }
-
-        opts.on(
-          '--git-sha SHA',
-          'Override detected git SHA of specified ' \
-          'branch allowing builds of old commits'
-        ) { |v| cli_options[:git_sha] = v }
 
         opts.on(
           '--[no-]xwidgets',
@@ -1834,7 +1834,9 @@ if __FILE__ == $PROGRAM_NAME
 
     Output.log_level = cli_options[:log_level]
     work_dir = cli_options.delete(:work_dir)
-    Build.new(work_dir, ARGV.shift, cli_options).build
+    ref = cli_options.delete(:ref)
+
+    Build.new(work_dir, ref, cli_options).build
   rescue Error => e
     warn "ERROR: #{e.message}"
     exit 1
