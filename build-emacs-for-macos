@@ -126,6 +126,190 @@ class OSVersion
   end
 end
 
+# Abstract base class for source fetchers
+class AbstractFetcher
+  include Output
+  include System
+
+  attr_reader :root_dir, :ref, :options
+
+  def initialize(root_dir, ref, options = {})
+    @root_dir = root_dir
+    @ref = ref
+    @options = options
+  end
+
+  # Returns metadata hash with keys: :sha, :date, :ref (optional)
+  # Must be implemented by subclasses
+  def fetch_metadata
+    raise NotImplementedError, "#{self.class} must implement fetch_metadata"
+  end
+
+  # Downloads/clones source and returns path to tarball/source directory
+  # Must be implemented by subclasses
+  def download_source(metadata)
+    raise NotImplementedError, "#{self.class} must implement download_source"
+  end
+
+  def tarballs_dir
+    @tarballs_dir ||= File.join(root_dir, 'tarballs')
+  end
+
+  def sources_dir
+    @sources_dir ||= File.join(root_dir, 'sources')
+  end
+end
+
+# GitHub-based fetcher using GitHub API and tarballs
+class GitHubFetcher < AbstractFetcher
+  DEFAULT_REPO = 'emacs-mirror/emacs'
+
+  def repo
+    # If git_url is provided, extract the repo from it
+    # e.g., "https://github.com/user/repo.git" -> "user/repo"
+    if options[:git_url]
+      uri = URI(options[:git_url])
+      path = uri.path.gsub(/^\//, '').gsub(/\.git$/, '')
+      return path
+    end
+
+    # Otherwise use github_src_repo or default
+    options[:github_src_repo] || DEFAULT_REPO
+  end
+
+  def fetch_metadata
+    ref_sha = options[:git_sha] || ref
+    info "Fetching GitHub metadata for ref: #{ref_sha}"
+    commit_json = github_api_get("/repos/#{repo}/commits/#{ref_sha}")
+    fatal "Failed to get commit info about: #{ref_sha}" if commit_json.nil?
+
+    commit = JSON.parse(commit_json)
+    meta = {
+      sha: commit['sha'],
+      date: Time.parse(commit['commit']['committer']['date'])
+    }
+    meta[:ref] = ref if ref && ref[0..6] != meta[:sha][0..6]
+
+    meta
+  end
+
+  def download_source(metadata)
+    FileUtils.mkdir_p(tarballs_dir)
+
+    sha = metadata[:sha]
+    url = "https://github.com/#{repo}/tarball/#{sha}"
+    filename = "#{repo.gsub(/[^a-zA-Z0-9-]+/, '-')}-#{sha[0..6]}.tgz"
+    target = File.join(tarballs_dir, filename)
+
+    if File.exist?(target)
+      info "#{filename} already exists locally, attempting to use."
+      return target
+    end
+
+    info 'Downloading tarball from GitHub. This could take a while, ' \
+         'please be patient.'
+
+    args = ['curl', '-L', url, '-o', target]
+    log_args = args.clone
+
+    if options[:github_auth] && ENV['GITHUB_TOKEN']
+      args =
+        [args[0]] + ['-H', "Authorization: Token #{ENV['GITHUB_TOKEN']}"] +
+        args[1..-1]
+      log_args =
+        [log_args[0]] + ['-H', '"Authorization: Token $GITHUB_TOKEN"'] +
+        log_args[1..-1]
+    end
+
+    debug "executing: #{log_args.join(' ')}"
+    cmd(*args)
+
+    target
+  end
+
+  private
+
+  def github_api_get(uri)
+    uri = URI.join('https://api.github.com/', uri)
+
+    http = Net::HTTP.new(uri.hostname, uri.port)
+    http.use_ssl = true if uri.scheme == 'https'
+
+    request = Net::HTTP::Get.new(uri)
+    if options[:github_auth] && ENV['GITHUB_TOKEN']
+      request['Authorization'] = "Token #{ENV['GITHUB_TOKEN']}"
+    end
+
+    response = http.request(request)
+    return unless response.code == '200'
+
+    response.body
+  end
+end
+
+# Generic Git fetcher using shallow clone
+class GenericGitFetcher < AbstractFetcher
+  def git_url
+    @git_url ||= options[:git_url] ||
+      fatal('git_url must be provided for git-based fetchers')
+  end
+
+  def fetch_metadata
+    info "Fetching Git metadata for ref: #{ref} from #{git_url}"
+
+    # Use a temporary shallow clone to get commit info
+    Dir.mktmpdir do |tmpdir|
+      repo_dir = File.join(tmpdir, 'repo')
+
+      # Shallow clone the specific branch/ref
+      run_cmd('git', 'clone', '--depth', '1', '--branch', ref, git_url, repo_dir)
+
+      Dir.chdir(repo_dir) do
+        sha = `git rev-parse HEAD`.strip
+        date_str = `git show -s --format=%cI HEAD`.strip
+
+        meta = {
+          sha: sha,
+          date: Time.parse(date_str)
+        }
+        meta[:ref] = ref if ref && ref[0..6] != meta[:sha][0..6]
+
+        return meta
+      end
+    end
+  end
+
+  def download_source(metadata)
+    FileUtils.mkdir_p(sources_dir)
+
+    sha = metadata[:sha]
+    dirname = "#{source_name}-#{ref}-#{sha[0..6]}"
+    target = File.join(sources_dir, dirname)
+
+    if File.exist?(target)
+      info "#{dirname} source tree exists, attempting to use."
+      return target
+    end
+
+    info "Cloning from #{git_url} (ref: #{ref}). This could take a while, " \
+         'please be patient.'
+
+    # Shallow clone to the target directory
+    run_cmd('git', 'clone', '--depth', '1', '--branch', ref, git_url, target)
+
+    # Remove .git directory to save space
+    FileUtils.rm_rf(File.join(target, '.git'))
+
+    target
+  end
+
+  def source_name
+    # Extract a reasonable source name from git URL
+    # e.g., "https://git.savannah.gnu.org/git/emacs.git" -> "emacs"
+    URI(git_url).path.split('/').last.gsub(/\.git$/, '')
+  end
+end
+
 class Build
   include Output
   include System
@@ -149,12 +333,18 @@ class Build
   def build
     load_plan(options[:plan]) if options[:plan]
 
-    unless meta[:sha] && meta[:date]
-      fatal 'Failed to get commit info from GitHub.'
-    end
+    # Use the fetcher abstraction to get source metadata and download source
+    source = fetcher.download_source(meta)
 
-    tarball = download_tarball(meta[:sha])
-    @source_dir = extract_tarball(tarball, patches(options))
+    # For git-based fetchers, source is already an extracted directory
+    # For GitHub fetcher, source is a tarball that needs extraction
+    if fetcher.is_a?(GitHubFetcher)
+      @source_dir = extract_tarball(source, patches(options))
+    else
+      @source_dir = source
+      # Apply patches directly to the git-cloned source
+      patches(options).each { |patch| apply_patch(patch, @source_dir) }
+    end
 
     autogen
     detect_native_comp if options[:native_comp].nil?
@@ -179,6 +369,40 @@ class Build
   end
 
   private
+
+  def fetcher
+    @fetcher ||= begin
+      # Auto-detect fetcher type based on git_url hostname
+      if options[:git_url]
+        uri = URI(options[:git_url])
+        hostname = uri.hostname
+
+        if hostname == 'github.com'
+          debug "Using GitHubFetcher for #{options[:git_url]}"
+          GitHubFetcher.new(root_dir, ref, options)
+        else
+          debug "Using GenericGitFetcher for #{options[:git_url]}"
+          GenericGitFetcher.new(root_dir, ref, options)
+        end
+      else
+        # Default to GitHub with github_src_repo or default repo
+        debug 'Using default GitHubFetcher'
+        GitHubFetcher.new(root_dir, ref, options)
+      end
+    end
+  end
+
+  def meta
+    return @meta if @meta
+
+    @meta = fetcher.fetch_metadata
+
+    unless @meta[:sha] && @meta[:date]
+      fatal "Failed to get commit info for ref: #{ref}"
+    end
+
+    @meta
+  end
 
   def load_plan(filename)
     debug "Loading plan from: #{filename}"
@@ -244,39 +468,6 @@ class Build
     end
 
     @extra_libs = libs
-  end
-
-  def download_tarball(sha)
-    FileUtils.mkdir_p(tarballs_dir)
-
-    url = "https://github.com/#{github_src_repo}/tarball/#{sha}"
-    filename = "#{github_src_repo.gsub(/[^a-zA-Z0-9-]+/, '-')}-#{sha[0..6]}.tgz"
-    target = File.join(tarballs_dir, filename)
-
-    if File.exist?(target)
-      info "#{filename} already exists locally, attempting to use."
-      return target
-    end
-
-    info 'Downloading tarball from GitHub. This could take a while, ' \
-         'please be patient.'
-
-    args = ['curl', '-L', url, '-o', target]
-    log_args = args.clone
-
-    if options[:github_auth] && ENV['GITHUB_TOKEN']
-      args =
-        [args[0]] + ['-H', "Authorization: Token #{ENV['GITHUB_TOKEN']}"] +
-        args[1..-1]
-      log_args =
-        [log_args[0]] + ['-H', '"Authorization: Token $GITHUB_TOKEN"'] +
-        log_args[1..-1]
-    end
-
-    debug "executing: #{log_args.join(' ')}"
-    cmd(*args)
-
-    target
   end
 
   def extract_tarball(filename, patches = [])
@@ -738,41 +929,6 @@ class Build
       .gsub('#define HAVE_ALLOCA_H 1', '#undef HAVE_ALLOCA_H')
 
     File.write(filename, content)
-  end
-
-  def meta
-    return @meta if @meta
-
-    ref_sha = options[:git_sha] || ref
-    info "Fetching info for git ref: #{ref_sha}"
-    commit_json = github_api_get("/repos/#{github_src_repo}/commits/#{ref_sha}")
-    fatal "Failed to get commit info about: #{ref_sha}" if commit_json.nil?
-
-    commit = JSON.parse(commit_json)
-    meta = {
-      sha: commit['sha'],
-      date: Time.parse(commit['commit']['committer']['date'])
-    }
-    meta[:ref] = ref if ref && ref[0..6] != meta[:sha][0..6]
-
-    @meta = meta
-  end
-
-  def github_api_get(uri)
-    uri = URI.join('https://api.github.com/', uri)
-
-    http = Net::HTTP.new(uri.hostname, uri.port)
-    http.use_ssl = true if uri.scheme == 'https'
-
-    request = Net::HTTP::Get.new(uri)
-    if options[:github_auth] && ENV['GITHUB_TOKEN']
-      request['Authorization'] = "Token #{ENV['GITHUB_TOKEN']}"
-    end
-
-    response = http.request(request)
-    return unless response.code == '200'
-
-    response.body
   end
 
   def effective_version
@@ -1521,6 +1677,7 @@ if __FILE__ == $PROGRAM_NAME
     tree_sitter: true,
     mps: true,
     fd_setsize: 10_000,
+    git_url: nil,  # Auto-detect fetcher based on URL hostname
     github_src_repo: nil,
     github_auth: true,
     dist_include: ['COPYING'],
@@ -1538,8 +1695,11 @@ if __FILE__ == $PROGRAM_NAME
         opts.banner = <<~DOC
           Usage: ./build-emacs-for-macos [options] <branch/tag/sha>
 
-          Branch, tag, and SHA are from the emacs-mirror/emacs/emacs Github repo,
-          available here: https://github.com/emacs-mirror/emacs
+          By default, sources are fetched from GitHub (emacs-mirror/emacs).
+          Use --git-url to specify a different source repository.
+          The fetcher type is auto-detected based on the URL hostname:
+            - github.com: Uses GitHub API and tarball downloads
+            - Others: Uses git shallow clone
 
           Options:
         DOC
@@ -1640,6 +1800,13 @@ if __FILE__ == $PROGRAM_NAME
           'environment variable is set.' \
           '(default: enabled)'
         ) { |v| cli_options[:github_auth] = v }
+
+        opts.on(
+          '--git-url URL',
+          'Git repository URL. Auto-detects fetcher: ' \
+          'github.com uses GitHub API, others use git clone. ' \
+          '(default: https://github.com/emacs-mirror/emacs)'
+        ) { |v| cli_options[:git_url] = v }
 
         opts.on(
           '--work-dir DIR',
