@@ -162,19 +162,11 @@ end
 
 # GitHub-based fetcher using GitHub API and tarballs
 class GitHubFetcher < AbstractFetcher
-  DEFAULT_REPO = 'emacs-mirror/emacs'
-
   def repo
-    # If git_url is provided, extract the repo from it
+    # Extract repo from git_url
     # e.g., "https://github.com/user/repo.git" -> "user/repo"
-    if options[:git_url]
-      uri = URI(options[:git_url])
-      path = uri.path.gsub(/^\//, '').gsub(/\.git$/, '')
-      return path
-    end
-
-    # Otherwise use github_src_repo or default
-    options[:github_src_repo] || DEFAULT_REPO
+    uri = URI(options[:git_url])
+    uri.path.gsub(/^\//, '').gsub(/\.git$/, '')
   end
 
   def fetch_metadata
@@ -314,8 +306,6 @@ class Build
   include Output
   include System
 
-  DEFAULT_GITHUB_REPO = 'emacs-mirror/emacs'
-
   attr_reader :root_dir
   attr_reader :source_dir
   attr_reader :ref
@@ -373,21 +363,15 @@ class Build
   def fetcher
     @fetcher ||= begin
       # Auto-detect fetcher type based on git_url hostname
-      if options[:git_url]
-        uri = URI(options[:git_url])
-        hostname = uri.hostname
+      uri = URI(options[:git_url])
+      hostname = uri.hostname
 
-        if hostname == 'github.com'
-          debug "Using GitHubFetcher for #{options[:git_url]}"
-          GitHubFetcher.new(root_dir, ref, options)
-        else
-          debug "Using GenericGitFetcher for #{options[:git_url]}"
-          GenericGitFetcher.new(root_dir, ref, options)
-        end
-      else
-        # Default to GitHub with github_src_repo or default repo
-        debug 'Using default GitHubFetcher'
+      if hostname == 'github.com'
+        debug "Using GitHubFetcher for #{options[:git_url]}"
         GitHubFetcher.new(root_dir, ref, options)
+      else
+        debug "Using GenericGitFetcher for #{options[:git_url]}"
+        GenericGitFetcher.new(root_dir, ref, options)
       end
     end
   end
@@ -436,10 +420,6 @@ class Build
 
   def output_dir
     @output_dir ||= (options[:output] || File.join(root_dir, 'builds'))
-  end
-
-  def github_src_repo
-    @github_src_repo ||= options[:github_src_repo] || DEFAULT_GITHUB_REPO
   end
 
   def brew_dir
@@ -1677,8 +1657,7 @@ if __FILE__ == $PROGRAM_NAME
     tree_sitter: true,
     mps: true,
     fd_setsize: 10_000,
-    git_url: nil,  # Auto-detect fetcher based on URL hostname
-    github_src_repo: nil,
+    git_url: 'https://github.com/emacs-mirror/emacs',
     github_auth: true,
     dist_include: ['COPYING'],
     self_sign: true,
@@ -1789,10 +1768,11 @@ if __FILE__ == $PROGRAM_NAME
         ) { |v| cli_options[:fd_setsize] = v.respond_to?(:to_i) ? v.to_i : 0 }
 
         opts.on(
-          '--github-src-repo REPO',
-          'Specify a GitHub repo to download source tarballs from ' \
-          '(default: emacs-mirror/emacs)'
-        ) { |v| cli_options[:github_src_repo] = v }
+          '--git-url URL',
+          'Git repository URL. Auto-detects fetcher: ' \
+          'github.com uses GitHub API, others use git clone. ' \
+          '(default: https://github.com/emacs-mirror/emacs)'
+        ) { |v| cli_options[:git_url] = v }
 
         opts.on(
           '--[no-]github-auth',
@@ -1800,13 +1780,6 @@ if __FILE__ == $PROGRAM_NAME
           'environment variable is set.' \
           '(default: enabled)'
         ) { |v| cli_options[:github_auth] = v }
-
-        opts.on(
-          '--git-url URL',
-          'Git repository URL. Auto-detects fetcher: ' \
-          'github.com uses GitHub API, others use git clone. ' \
-          '(default: https://github.com/emacs-mirror/emacs)'
-        ) { |v| cli_options[:git_url] = v }
 
         opts.on(
           '--work-dir DIR',
