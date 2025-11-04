@@ -140,8 +140,8 @@ class Build
 
   def initialize(root_dir, ref = nil, options = {})
     @root_dir = root_dir
-    #@ref = ref || 'feature/igc'
-    @ref = ref || 'master'
+    @ref = ref || 'feature/igc'
+    #@ref = ref || 'master'
     @options = options
     @gcc_info = GccInfo.new
   end
