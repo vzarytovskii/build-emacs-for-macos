@@ -254,7 +254,7 @@ class GenericGitFetcher < AbstractFetcher
       return extract_metadata_from_cached(cached_dir)
     end
 
-    info "Cloning from #{git_url} (ref: #{ref}) to fetch metadata and source..."
+    info "Fetching metadata and source via git clone..."
 
     # We need to clone to get metadata, but we'll reuse this clone
     # in download_source by caching it
@@ -281,7 +281,7 @@ class GenericGitFetcher < AbstractFetcher
     end
 
     # This shouldn't happen, but handle it just in case
-    info "Cloning from #{git_url} (ref: #{ref})..."
+    info "Performing git clone..."
     perform_clone
   end
 
@@ -305,6 +305,9 @@ class GenericGitFetcher < AbstractFetcher
     temp_dir = File.join(sources_dir, ".tmp-#{source_name}-#{sanitized_ref}-#{Process.pid}")
 
     begin
+      info "Cloning repository: #{git_url}"
+      info "Checking out revision: #{ref}"
+
       run_cmd('git', 'clone', '--depth', '1', '--revision', ref, git_url, temp_dir)
 
       # Get SHA to determine final directory name
@@ -313,10 +316,13 @@ class GenericGitFetcher < AbstractFetcher
       sha = `git rev-parse HEAD`.strip
     end
 
+      info "Checked out commit: #{sha}"
 
     # Rename to final name with SHA
     dirname = "#{source_name}-#{sanitized_ref}-#{sha[0..6]}"
     target = File.join(sources_dir, dirname)
+
+      info "Moving cloned source to: #{dirname}"
 
       # Remove .git directory to save space before renaming
       FileUtils.rm_rf(File.join(temp_dir, '.git'))
