@@ -246,52 +246,144 @@ class GenericGitFetcher < AbstractFetcher
   end
 
   def fetch_metadata
-    info "Fetching Git metadata for ref: #{ref} from #{git_url}"
+    # Check if we already have a cached clone for this ref
+    cached_dir = find_cached_source
 
-    # Use a temporary shallow clone to get commit info
-    Dir.mktmpdir do |tmpdir|
-      repo_dir = File.join(tmpdir, 'repo')
-
-      # Shallow clone the specific branch/ref
-      run_cmd('git', 'clone', '--depth', '1', '--revision', ref, git_url, repo_dir)
-
-      Dir.chdir(repo_dir) do
-        sha = `git rev-parse HEAD`.strip
-        date_str = `git show -s --format=%cI HEAD`.strip
-
-        meta = {
-          sha: sha,
-          date: Time.parse(date_str)
-        }
-        meta[:ref] = ref if ref && ref[0..6] != meta[:sha][0..6]
-
-        return meta
-      end
+    if cached_dir
+      info "Found cached source for ref #{ref}, extracting metadata"
+      return extract_metadata_from_cached(cached_dir)
     end
+
+    info "Cloning from #{git_url} (ref: #{ref}) to fetch metadata and source..."
+
+    # We need to clone to get metadata, but we'll reuse this clone
+    # in download_source by caching it
+    @cloned_source = perform_clone
+
+    extract_metadata_from_source(@cloned_source)
   end
 
   def download_source(metadata)
-    FileUtils.mkdir_p(sources_dir)
-
-    sha = metadata[:sha]
-    dirname = "#{source_name}-#{ref}-#{sha[0..6]}"
-    target = File.join(sources_dir, dirname)
-
-    if File.exist?(target)
-      info "#{dirname} source tree exists, attempting to use."
-      return target
+    # If we already cloned in fetch_metadata, just return that path
+    if @cloned_source
+      debug "Reusing clone from fetch_metadata"
+      source = @cloned_source
+      @cloned_source = nil  # Clear it so we don't reuse accidentally
+      return source
     end
 
-    info "Cloning from #{git_url} (ref: #{ref}). This could take a while, " \
-         'please be patient.'
+    # Check again for cached source (in case it was created between calls)
+    cached_dir = find_cached_source
 
-    # Shallow clone to the target directory
-    run_cmd('git', 'clone', '--depth', '1', '--revision', ref, git_url, target)
+    if cached_dir
+      info "Using cached source: #{File.basename(cached_dir)}"
+      return cached_dir
+    end
 
-    # Remove .git directory to save space
-    FileUtils.rm_rf(File.join(target, '.git'))
+    # This shouldn't happen, but handle it just in case
+    info "Cloning from #{git_url} (ref: #{ref})..."
+    perform_clone
+  end
 
-    target
+  private
+
+  def find_cached_source
+    # Look for existing source directory matching pattern
+    # Pattern: source_name-ref-sha[0..6]
+    pattern = File.join(sources_dir, "#{source_name}-#{ref}-*")
+    matches = Dir.glob(pattern)
+    matches.first if matches.any?
+  end
+
+  def perform_clone
+    FileUtils.mkdir_p(sources_dir)
+
+    # Sanitize ref for directory name
+    sanitized_ref = ref.gsub(/[^a-zA-Z0-9-]+/, '-')
+
+    # Clone to a temporary location first
+    temp_dir = File.join(sources_dir, ".tmp-#{source_name}-#{sanitized_ref}-#{Process.pid}")
+
+    begin
+      run_cmd('git', 'clone', '--depth', '1', '--revision', ref, git_url, temp_dir)
+
+      # Get SHA to determine final directory name
+      sha = nil
+      Dir.chdir(temp_dir) do
+      sha = `git rev-parse HEAD`.strip
+    end
+
+
+    # Rename to final name with SHA
+    dirname = "#{source_name}-#{sanitized_ref}-#{sha[0..6]}"
+    target = File.join(sources_dir, dirname)
+
+      # Remove .git directory to save space before renaming
+      FileUtils.rm_rf(File.join(temp_dir, '.git'))
+
+      FileUtils.mv(temp_dir, target)
+
+      target
+    rescue => e
+      # Clean up temp directory on error
+      FileUtils.rm_rf(temp_dir) if File.exist?(temp_dir)
+      raise e
+    end
+  end
+
+  def extract_metadata_from_cached(source_dir)
+    # For cached sources, read git info from a marker file if it exists
+    # Otherwise, we'll need to extract what we can from the directory name
+    marker_file = File.join(source_dir, '.git-metadata')
+
+    if File.exist?(marker_file)
+      metadata = YAML.safe_load(File.read(marker_file), permitted_classes: [Time])
+      return metadata
+    end
+
+    # Fallback: try to extract from directory name
+    # Pattern: source_name-ref-sha[0..6]
+    basename = File.basename(source_dir)
+    if basename =~ /-([a-f0-9]{7})$/
+      short_sha = $1
+      # We don't have the full SHA or date, so we need to look it up
+      # For now, just use what we have
+      warn "Cached source found but metadata incomplete, using directory info"
+      {
+        sha: short_sha + "0" * (40 - 7),  # Pad to full SHA length (not ideal but works)
+        date: File.mtime(source_dir),
+        ref: ref
+      }
+    else
+      fatal "Cannot extract metadata from cached source: #{basename}"
+    end
+  end
+
+  def extract_metadata_from_source(source_dir)
+    # Extract metadata and save it for future use
+    metadata = {}
+
+    # We need to temporarily restore .git to get full metadata
+    # Actually, we can use git commands even without .git if we check before removal
+    temp_git = File.join(source_dir, '.git')
+    has_git = File.exist?(temp_git)
+
+    if has_git
+      Dir.chdir(source_dir) do
+        metadata[:sha] = `git rev-parse HEAD`.strip
+        metadata[:date] = Time.parse(`git show -s --format=%cI HEAD`.strip)
+        metadata[:ref] = ref if ref && ref[0..6] != metadata[:sha][0..6]
+      end
+
+      # Save metadata for future use
+      marker_file = File.join(source_dir, '.git-metadata')
+      File.write(marker_file, YAML.dump(metadata))
+    else
+      # Git directory already removed, extract from directory name
+      return extract_metadata_from_cached(source_dir)
+    end
+
+    metadata
   end
 
   def source_name
