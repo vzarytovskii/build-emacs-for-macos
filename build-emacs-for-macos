@@ -434,6 +434,7 @@ class Build
 
     autogen
     detect_native_comp if options[:native_comp].nil?
+    print_pre_configure_summary
 
     app = compile_source(@source_dir)
     build_dir, app = create_build_dir(app)
@@ -452,6 +453,8 @@ class Build
     self_sign_app(app) if options[:self_sign]
 
     archive_build(build_dir) if options[:archive]
+
+    print_post_build_summary
   end
 
   private
@@ -940,6 +943,152 @@ class Build
 
       File.write(filename, content)
     end
+  end
+
+  def print_pre_configure_summary
+    info '=' * 80
+    info 'BUILD CONFIGURATION SUMMARY'
+    info '=' * 80
+
+    # Source Information
+    info ''
+    info 'Source Information:'
+    info "  Repository: #{options[:git_url]}"
+    info "  Ref:        #{ref}"
+    info "  Commit:     #{meta[:sha][0..6]} (#{meta[:date]&.strftime('%Y-%m-%d %H:%M:%S')})"
+    info "  Full SHA:   #{meta[:sha]}"
+
+    # Requested Features
+    info ''
+    info 'Requested Features:'
+    info "  Native-comp:     #{format_option(options[:native_comp])}"
+    info "  XWidgets:        #{format_option(options[:xwidgets])}"
+    info "  Tree-sitter:     #{format_option(options[:tree_sitter])}"
+    info "  MPS:             #{format_option(options[:mps])}"
+    info "  RSVG:            #{format_option(options[:rsvg])}"
+    info "  DBus:            #{format_option(options[:dbus])}"
+
+    # Feature Detection Results
+    info ''
+    info 'Feature Detection (what this Emacs version supports):'
+    info "  Native-comp:     #{format_detected(supports_native_comp?)}"
+    info "  XWidgets:        #{format_detected(supports_xwidgets?)}"
+    info "  Tree-sitter:     #{format_detected(supports_tree_sitter?)}"
+    info "  MPS:             #{format_detected(supports_mps?)}"
+
+    # Final Enabled Features
+    info ''
+    info 'Features That Will Be Built:'
+    enabled_features = []
+    enabled_features << 'native-comp' if options[:native_comp] && supports_native_comp?
+    enabled_features << 'xwidgets' if options[:xwidgets] && supports_xwidgets?
+    enabled_features << 'tree-sitter' if options[:tree_sitter] && supports_tree_sitter?
+    enabled_features << 'mps' if options[:mps] && supports_mps?
+    enabled_features << 'rsvg' if options[:rsvg] != false
+    enabled_features << 'dbus' if options[:dbus]
+
+    if enabled_features.empty?
+      info '  (none - base build only)'
+    else
+      enabled_features.each { |f| info "  - #{f}" }
+    end
+
+    # Native-comp specific options
+    if options[:native_comp] && supports_native_comp?
+      info ''
+      info 'Native-comp Options:'
+      info "  Full AOT:        #{format_option(options[:native_full_aot])}"
+      info "  March=native:    #{format_option(options[:native_march])}"
+      info "  Relink .eln:     #{format_option(options[:relink_eln])}"
+    end
+
+    # Build Options
+    info ''
+    info 'Build Options:'
+    info "  Parallel jobs:   #{options[:parallel]}"
+    info "  FD_SETSIZE:      #{options[:fd_setsize]}"
+    info "  Self-sign:       #{format_option(options[:self_sign])}"
+    info "  Archive:         #{format_option(options[:archive])}"
+
+    # Output
+    info ''
+    info 'Output:'
+    info "  Directory:       #{output_dir}"
+    info "  Build name:      #{build_name}"
+
+    info '=' * 80
+    info ''
+  end
+
+  def print_post_build_summary
+    info ''
+    info '=' * 80
+    info 'BUILD COMPLETED SUCCESSFULLY'
+    info '=' * 80
+
+    # Build Information
+    info ''
+    info 'Build Information:'
+    info "  Name:            #{build_name}"
+    info "  Location:        #{File.join(output_dir, build_name)}"
+
+    # Source Summary
+    info ''
+    info 'Source:'
+    info "  Repository:      #{options[:git_url]}"
+    info "  Ref:             #{ref}"
+    info "  Commit:          #{meta[:sha][0..6]} (#{meta[:date]&.strftime('%Y-%m-%d')})"
+
+    # Enabled Features
+    info ''
+    info 'Built Features:'
+    enabled_features = []
+    enabled_features << 'native-comp' if options[:native_comp] && supports_native_comp?
+    enabled_features << 'xwidgets' if options[:xwidgets] && supports_xwidgets?
+    enabled_features << 'tree-sitter' if options[:tree_sitter] && supports_tree_sitter?
+    enabled_features << 'mps' if options[:mps] && supports_mps?
+    enabled_features << 'rsvg' if options[:rsvg] != false
+    enabled_features << 'dbus' if options[:dbus]
+
+    if enabled_features.empty?
+      info '  (none - base build only)'
+    else
+      enabled_features.each { |f| info "  - #{f}" }
+    end
+
+    # Native-comp details if enabled
+    if options[:native_comp] && supports_native_comp?
+      info ''
+      info 'Native-comp:'
+      info "  Full AOT:        #{format_option(options[:native_full_aot])}"
+      info "  March=native:    #{format_option(options[:native_march])}"
+    end
+
+    # Archive info
+    if options[:archive]
+      info ''
+      info 'Archive:'
+      info "  File:            #{archive_filename}"
+    end
+
+    info '=' * 80
+  end
+
+  def format_option(value)
+    case value
+    when true
+      'enabled'
+    when false
+      'disabled'
+    when nil
+      'auto-detect'
+    else
+      value.to_s
+    end
+  end
+
+  def format_detected(supported)
+    supported ? 'supported' : 'not supported'
   end
 
   def build_name
@@ -1753,7 +1902,6 @@ if __FILE__ == $PROGRAM_NAME
     tree_sitter: true,
     mps: true,
     fd_setsize: 10_000,
-    git_url: 'https://https.git.savannah.gnu.org/git/emacs.git',
     github_auth: true,
     dist_include: ['COPYING'],
     self_sign: true,
@@ -1762,7 +1910,9 @@ if __FILE__ == $PROGRAM_NAME
     log_level: 'info',
     no_titlebar: false,
     no_frame_refocus: false,
-    ref: 'refs/heads/feature/igc'  # Will use 'master' as default if not specified
+    #git_url: 'https://https.git.savannah.gnu.org/git/emacs.git',
+    git_url: 'https://github.com/emacsmirror/emacs',
+    #ref: 'refs/heads/feature/igc'  # Will use 'master' as default if not specified
   }
 
   begin
